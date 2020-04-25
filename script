@@ -1,0 +1,39 @@
+#!/bin/sh
+
+
+
+
+while [ `find /home/y/var/ymail_lsg_dhr_client/*/dhr_client/processing/* -ls 2>/dev/null | wc -l` -gt 0 ]; do
+  echo
+  echo ==== Waiting for dhr_client to process these logs ====
+  echo `find /home/y/var/ymail_lsg_dhr_client/*/dhr_client/processing/* -ls | awk -F/ '{print $NF}'`
+  sleep 60
+done
+
+echo
+echo ==== Checking DHR spool ====
+if [ `/home/y/bin/dh_rainbow_spool_check | /home/y/bin64/jq .spoolUsed.stagingcho | bc` -gt 0 ]; then
+  echo DHR has unsent data in spool. Make sure there is no spool before rebuilding this host
+else
+  echo No spool in DHR, this host may be rebuilt
+fi
+echo ============================
+echo
+
+
+----------------------------------------
+
+Requirement :
+ Wants line number 129 to 134 , to run only 15 times and after that whatever data is left  should be copied to location : /home/y/hs/v1/{hostname}/ymail_lsg_dhr_client/
+
+i.e
+"
+while [ `find /home/y/var/ymail_lsg_dhr_client/*/dhr_client/processing/* -ls 2>/dev/null | wc -l` -gt 0 ]; do
+  echo
+  echo ==== Waiting for dhr_client to process these logs ====
+  echo `find /home/y/var/ymail_lsg_dhr_client/*/dhr_client/processing/* -ls | awk -F/ '{print $NF}'`
+  sleep 60
+done
+"
+
+this blog to run only 15 times and after that whatever data is there should be copied to location : /home/y/hs/v1/{hostname}/ymail_lsg_dhr_client

@@ -1,7 +1,130 @@
 #!/bin/sh
 
+if [ "$1" != "-yes" ]; then
+  read -p "Is this host out of rotation? (type Yes if yes) " a
+  if [ "$a" != "Yes" ]; then
+    echo Please take this host OOR before running this script.
+    exit 1
+  fi
+fi
 
 
+host=`hostname`
+if [[ $host =~ ^ls ]]; then
+  echo
+  echo ==== LSG Proxy, no dhr logs to process, quiting ====
+  exit 0
+fi
+
+
+jetty_status() {
+  echo $(/usr/sbin/ss -ln | egrep '4080|4443|8080|8443' | wc -l)
+}
+
+offline_jobs() {
+  echo $(ps -ef |egrep 'expunger|hsarchiver'|grep -v grep|wc -l)
+}
+
+expunger_stop() {
+  yinst set ymail_lsg_delete_mb_expunger.crontab=off ymail_lsg_inactive_purge_mb_expunger.crontab=off 1>/dev/null 2>/dev/null && sudo /home/y/libexec/ymail_lsg_tools/delete_mb_expunger/bin/ymail_lsg_delete_mb_expunger_stop.sh && sudo /home/y/libexec/ymail_lsg_tools/inactive_purge_mb_expunger/bin/ymail_lsg_inactive_purge_mb_expunger_stop.sh
+  if [ $? != 0 ]; then
+    echo Failed to stop mb_expunger/purge_mb_expunger
+    exit 1
+  fi
+}
+
+
+if [ $(jetty_status) -gt 0 ]; then
+  echo 
+  echo ==== Application is running , please take the host OOR before running this script ====
+  exit 1
+fi
+
+if [ $(offline_jobs) -gt 0 ]; then
+  echo
+  echo ==== Offline jobs are running , will be terminated ====
+fi
+
+
+echo 
+echo ==== Stopping mb_expunger/purge_mb_expunger ====
+expunger_stop
+
+if [[ $host =~ ^hs[0-9] ]]; then
+  echo
+  echo ==== Stopping hs_archiver ====
+  yinst set ymail_lsg_hsarchiver.crontab=off 1>/dev/null 2>/dev/null && sudo /home/y/libexec/ymail_lsg_hsarchiver/bin/stopHSArchiver
+  if [ $? != 0 ]; then
+    echo Failed to stop hs_archiver
+    exit 1
+  fi
+fi
+
+if [[ $host =~ ^hsas ]]; then
+  echo
+  echo ==== Stopping msg_expunger ====
+  yinst set ymail_lsg_hsasmsgexpunger.crontab=off 1>/dev/null 2>/dev/null && sudo /home/y/libexec/ymail_lsg_hsasmsgexpunger/bin/killHSASMsgExpunger
+  if [ $? != 0 ]; then
+    echo Failed to stop msg_expunger
+    exit 1
+  fi
+fi
+
+if [[ $host =~ ^ads ]]; then
+  echo
+  echo ==== Stopping attachment_expunger ====
+  yinst set ymail_lsg_adsattachmentexpunger.crontab=off 1>/dev/null 2>/dev/null
+
+  pid=`ps aux | grep '[A]DSAttachmentExpungerCLI' | awk '{print $2}'`
+  echo $pid
+  if [[ ! -z $pid ]]; then
+    sudo kill -9 $pid
+  fi
+  if [ $? != 0 ]; then
+    echo Failed to stop attachment_expunger
+    exit 1
+  fi
+fi
+
+
+echo ==== Stopping all packages ====
+yinst stop -all
+if [ $? != 0 ]; then
+  echo Failed to run yinst stop -all
+  exit 1
+fi
+
+
+echo 
+echo ==== Checking for absolver logs in dhr and cleaning up  ====
+sudo find /home/y/var/ymail_lsg_audits/fileExpunger/ -name 'absolver.log-*' -type f -print -delete
+
+
+#check the application logs in /home/y/var/ymail_lsg_audits/*/
+#if there is any .log file sized >0, rename it with date, e.g.
+#  hsdfilecreation.log -> hsdfilecreation.log-02-11-2019-0.log
+echo
+echo ==== Checking /home/y/var/ymail_lsg_audits/ ====
+
+for l in `find /home/y/var/ymail_lsg_audits/*/*.log -not -empty -ls | grep -v "\.log\-" | awk '{print $NF}'`; do
+  sudo mv $l $l-`date +%m-%d-%Y`-0.log
+  echo Renamed `echo $l | sed 's/^\/home\/y\/var\/ymail_lsg_audits\///'` to `echo $l | awk -F/ '{print $NF}'`-`date +%m-%d-%Y`-0.log
+done
+
+echo
+echo ==== Staring DHR and ymail_lsg_dhr_client ====
+yinst set ymail_lsg_dhr_client.ac_schedulerDelay=10 ymail_lsg_dhr_client.ac_schedulerInitialDelay=10 ymail_lsg_dhr_client.adscreate_schedulerDelay=10 ymail_lsg_dhr_client.adscreate_schedulerInitialDelay=10 ymail_lsg_dhr_client.ascreate_schedulerDelay=10 ymail_lsg_dhr_client.ascreate_schedulerInitialDelay=10 ymail_lsg_dhr_client.asmsgexpunger_schedulerDelay=10 ymail_lsg_dhr_client.asmsgexpunger_schedulerInitialDelay=10 ymail_lsg_dhr_client.asscan_schedulerDelay=10 ymail_lsg_dhr_client.asscan_schedulerInitialDelay=10 ymail_lsg_dhr_client.detach_schedulerDelay=10 ymail_lsg_dhr_client.detach_schedulerInitialDelay=10 ymail_lsg_dhr_client.fileexpunger_schedulerDelay=10 ymail_lsg_dhr_client.fileexpunger_schedulerInitialDelay=10 ymail_lsg_dhr_client.hsascreate_schedulerDelay=10 ymail_lsg_dhr_client.hsascreate_schedulerInitialDelay=10 ymail_lsg_dhr_client.hsasmsgexpunge_schedulerDelay=10 ymail_lsg_dhr_client.hsasmsgexpunge_schedulerInitialDelay=10 ymail_lsg_dhr_client.hscreate_schedulerDelay=10 ymail_lsg_dhr_client.hscreate_schedulerInitialDelay=10 ymail_lsg_dhr_client.hsscan_schedulerDelay=10 ymail_lsg_dhr_client.hsscan_schedulerInitialDelay=10 ymail_lsg_dhr_client.mailboxexpunger_schedulerDelay=10 ymail_lsg_dhr_client.mailboxexpunger_schedulerInitialDelay=10 ymail_lsg_dhr_client.sweeper_schedulerDelay=10 ymail_lsg_dhr_client.sweeper_schedulerInitialDelay=10 1>/dev/null 2>/dev/null && yinst start dh_rainbow_common_emitter dh_rainbow_file_counter_daemon_cpp dh_rainbow_common && yinst start dh_rainbow_emitter_java_meta && yinst start ymail_lsg_dhr_client
+if [ $? != 0 ]; then
+  echo Failed to start DHR and/or ymail_lsg_dhr_client
+  exit 1
+fi
+
+while [ `find /home/y/var/ymail_lsg_audits/*/*.log-*.log -ls 2>/dev/null | wc -l` -gt 0 ]; do
+  echo
+  echo ==== Waiting for dhr_client to pick up these logs ====
+  echo `find /home/y/var/ymail_lsg_audits/*/*.log-*.log -ls | awk -F/ '{print $NF}'`
+  sleep 10
+done
 
 while [ `find /home/y/var/ymail_lsg_dhr_client/*/dhr_client/processing/* -ls 2>/dev/null | wc -l` -gt 0 ]; do
   echo
